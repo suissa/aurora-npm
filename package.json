@@ -1,0 +1,27 @@
+{
+  "name": "@aurora.purecore.codes/latest",
+  "version": "1.0.0",
+  "description": "Aurora Package Manager - Standalone (no external dependencies)",
+  "main": "index.js",
+  "bin": {
+    "aurora": "./bin/aurora.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "aurora",
+    "austral",
+    "package",
+    "manager",
+    "purecore",
+    "allascode",
+    "suissa"
+  ],
+  "author": "suissAI",
+  "license": "MIT",
+  "dependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

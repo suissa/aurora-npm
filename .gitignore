@@ -1,0 +1,8 @@
+node_modules
+dist
+aurora_packages
+bun.lock
+package-lock.json
+scripts/
+
+IMPLEMENTATION_SUMMARY.md
