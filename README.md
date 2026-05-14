@@ -1,90 +1,85 @@
 # Aurora Package Manager
 
-Gerenciador de pacotes para a linguagem Aurora Austral **sem dependências externas**.
+A high-performance, standalone package manager for the **Aurora Austral** language, designed with **zero external dependencies**.
 
-## Instalação
+## Installation
 
 ```bash
-npm install -g @aurora.purecore.codes/latest@1.0.0
+npm install -g @aurora.purecore.codes/latest@1.1.0
 ```
 
-**Nota:** Este package não tem dependências externas. Usa apenas o Node.js nativo (fetch, fs, path, os, child_process).
+**Note:** This package is completely self-contained. It uses native Node.js APIs only (`fetch`, `fs`, `path`, `os`, `child_process`), so you don't even need to run `npm install` inside the project folder.
 
-## Requisitos
+## Requirements
 
-- Node.js >= 18.0.0 (para suporte nativo a `fetch`)
-- WSL (opcional, para Windows)
+- **Node.js >= 18.0.0** (required for native `fetch` support)
+- **WSL** (recommended for Windows users)
 
-## Comandos
+## Commands
 
 ### `aurora init`
 
-Inicializa um novo projeto Aurora Austral com estrutura completa:
+Initialize a new Aurora Austral project with a complete structure:
 
 ```bash
 aurora init
 ```
 
-O que faz:
-- ✅ Cria `aurora.json` com configuração do projeto
-- ✅ Cria estrutura de diretórios (`src/`, `aurora_packages/`, `.aurora/`)
-- ✅ **Baixa binário do compilador** para a plataforma atual
-- ✅ **Baixa biblioteca padrão**
-- ✅ Cria arquivos de exemplo (`src/Main.aui`, `src/Main.aum`)
-- ✅ Cria `Makefile` configurado
-- ✅ Cria `.gitignore`
+**What it does:**
+- ✅ Creates `aurora.json` project configuration.
+- ✅ Sets up the directory structure (`src/`, `aurora_packages/`, `.aurora/`).
+- ✅ **Downloads the compiler binary** for your current platform.
+- ✅ Configures the project to use the **local standard library** (detected automatically).
+- ✅ Creates boilerplate files (`src/Main.aui`, `src/Main.aum`).
+- ✅ Generates a pre-configured `Makefile`.
+- ✅ Creates a `.gitignore` file.
 
-**Opções:**
-- `--no-binary`: Não baixa binários (usa instalação do sistema)
-
-**Exemplo:**
-```bash
-mkdir meu-projeto
-cd meu-projeto
-aurora init
-
-# Compilar e executar
-make build
-./main
-```
+**Options:**
+- `--no-binary`: Skip downloading binaries (uses the system's `austral` compiler instead).
 
 ### `aurora install <package>`
 
-Instala um pacote do repositório:
+Install a package from the official Vault repository:
 
 ```bash
 aurora install dpop-token
 ```
 
-O que faz:
-- Baixa o pacote do GitHub
-- Compila o pacote
-- Executa testes
-- Salva em cache local
+**Workflow:**
+1. Downloads the package from GitHub.
+2. Compiles the package locally.
+3. Runs the package's internal tests.
+4. **Caches** the package globally for future use.
+5. Keeps a copy in `aurora_packages/` for your project to use.
 
 ### `aurora list`
 
-Lista pacotes disponíveis:
+List available packages:
 
 ```bash
-# Listar pacotes remotos
+# List remote packages in the Vault
 aurora list
 
-# Listar pacotes em cache local
+# List locally cached packages
 aurora list --local
 ```
 
-### `aurora find <nome>`
+### `aurora find <query>`
 
-Busca pacotes por nome:
+Search for packages with an intelligent matching system:
 
 ```bash
 aurora find dpop
 ```
 
+**How it works:**
+- Searches for the `<query>` in **package names**.
+- Performs a deep search inside the **README.md** files of every package in the repository.
+- Highlights if the match was found inside a README for better context.
+
 ### `aurora uninstall <package>`
 
-Remove um pacote:
+Remove a package from both your project and the local cache:
 
 ```bash
 aurora uninstall dpop-token
@@ -92,50 +87,45 @@ aurora uninstall dpop-token
 
 ### `aurora update [package]`
 
-Atualiza pacotes:
+Update your project dependencies:
 
 ```bash
-# Atualizar todos os pacotes
+# Update all installed packages
 aurora update
 
-# Atualizar pacote específico
+# Update a specific package
 aurora update dpop-token
 ```
 
-### `aurora test <package>`
+---
 
-Executa testes de um pacote:
+## Project Structure
 
-```bash
-aurora test dpop-token
-```
-
-## Estrutura de Projeto
-
-Após `aurora init`:
+A typical project initialized with `aurora init` looks like this:
 
 ```
-meu-projeto/
-├── aurora.json              # Configuração do projeto
-├── Makefile                 # Build configuration
-├── .gitignore              # Git ignore
+my-project/
+├── aurora.json              # Project configuration
+├── Makefile                 # Build automation script
+├── .gitignore               # Git exclusion rules
 ├── src/
-│   ├── Main.aui            # Interface do módulo principal
-│   └── Main.aum            # Implementação do módulo principal
-├── aurora_packages/        # Pacotes instalados
+│   ├── Main.aui            # Main module interface
+│   └── Main.aum            # Main module implementation
+├── aurora_packages/        # Installed dependencies
 └── .aurora/
-    ├── bin/
-    │   └── austral         # Compilador (baixado automaticamente)
-    └── stdlib/             # Biblioteca padrão (baixada automaticamente)
+    └── bin/
+        └── austral         # Downloaded compiler binary
 ```
+
+---
 
 ## aurora.json
 
-Arquivo de configuração do projeto:
+The project's heart, containing build and dependency settings:
 
 ```json
 {
-  "name": "meu-projeto",
+  "name": "my-project",
   "version": "0.1.0",
   "description": "Aurora Austral project",
   "main": "src/Main.aum",
@@ -149,185 +139,61 @@ Arquivo de configuração do projeto:
   "aurora": {
     "compiler": "local",
     "compilerPath": ".aurora/bin/austral",
-    "stdlibPath": ".aurora/stdlib"
+    "stdlibPath": "local:aurora-austral-standard-lib/src"
   }
 }
 ```
 
-## Binários Pré-compilados
+---
 
-O comando `aurora init` baixa automaticamente binários pré-compilados para:
+## Technical Details
 
-- **Linux x64** (`linux-x64`)
-- **macOS x64** (`darwin-x64`)
-- **macOS ARM64** (`darwin-arm64` - M1/M2)
-- **Windows x64** (`win32-x64`)
+### Cross-Device Compatibility
+The manager uses a custom `moveDir` implementation that safely handles file transfers across different filesystems (e.g., moving files from a Windows `/mnt/d/` drive to a WSL `/home/` directory), avoiding the common `EXDEV` error.
 
-Os binários são baixados do GitHub Releases e salvos em:
-- Cache global: `~/.aurora_austral/bin/`
-- Projeto local: `.aurora/bin/`
+### Local Standard Library Integration
+The manager is designed to work seamlessly with the `aurora-austral-standard-lib`. It automatically detects the library's location in sibling directories or uses the `AUSTRAL_STDLIB` environment variable to ensure all your packages compile against the correct version of the standard library.
 
-## Workflow Típico
+---
 
-### 1. Criar Novo Projeto
+## Supported Platforms
 
-```bash
-mkdir meu-app
-cd meu-app
-aurora init
-```
-
-### 2. Desenvolver
-
-Edite `src/Main.aum`:
-
-```austral
-module body Example.Main is
-    function main(): ExitCode is
-        printLn("Hello, Aurora!");
-        printLn("A language with linear types!");
-        return ExitSuccess();
-    end;
-end module body.
-```
-
-### 3. Instalar Dependências
-
-```bash
-aurora install dpop-token
-aurora install http-client
-```
-
-### 4. Compilar e Executar
-
-```bash
-make build
-./main
-```
-
-### 5. Testar
-
-```bash
-make test
-```
-
-## Sem Binários Pré-compilados
-
-Se preferir usar uma instalação manual do compilador:
-
-```bash
-# Inicializar sem baixar binários
-aurora init --no-binary
-
-# O Makefile usará 'austral' do PATH do sistema
-make build
-```
-
-## Cache
-
-Os pacotes e binários são salvos em cache:
-
-```
-~/.aurora_austral/
-├── packages/          # Pacotes instalados
-└── bin/              # Binários do compilador
-    ├── austral       # Compilador
-    └── stdlib/       # Biblioteca padrão
-```
-
-## Desenvolvimento
-
-### Compilar Binários para Release
-
-```bash
-cd @aurora.purecore.codes/latest@1.0.0
-./scripts/build-release.sh 0.2.0
-```
-
-Isso cria:
-- `releases/austral-<platform>-<arch>` - Binário compilado
-- `releases/austral-<platform>-<arch>.sha256` - Checksum
-- `releases/stdlib-v0.2.0/` - Biblioteca padrão
-- `releases/release-info-v0.2.0.txt` - Informações do release
-
-### Fazer Release no GitHub
-
-```bash
-# Criar tag
-git tag -a v0.2.0 -m "Release v0.2.0"
-git push origin v0.2.0
-
-# Criar release com binários
-gh release create v0.2.0 \
-  releases/austral-linux-x64 \
-  releases/austral-darwin-x64 \
-  releases/austral-darwin-arm64 \
-  releases/austral-win32-x64.exe \
-  --title "Aurora Austral v0.2.0" \
-  --notes "Compiled binaries for multiple platforms"
-```
-
-Veja [BINARY_RELEASE.md](BINARY_RELEASE.md) para mais detalhes.
-
-## Plataformas Suportadas
-
-### Compilador
-- Linux x64
-- macOS x64 (Intel)
-- macOS ARM64 (Apple Silicon)
-- Windows x64 (via WSL)
+### Compiler Binaries
+- **Linux x64**
+- **macOS x64** (Intel)
+- **macOS ARM64** (Apple Silicon)
+- **Windows x64** (via WSL)
 
 ### Package Manager
-- Linux
-- macOS
-- Windows (com WSL)
+- **Linux**
+- **macOS**
+- **Windows** (via WSL/Bash)
+
+---
 
 ## Troubleshooting
 
-### Binário não executa
-
-**Linux/macOS:**
+### Binary Execution Issues
+If the downloaded binary doesn't run on Linux/macOS:
 ```bash
 chmod +x .aurora/bin/austral
 ./.aurora/bin/austral --version
 ```
 
-**Windows:**
-- Certifique-se de que o WSL está instalado
-- O comando `make` será executado via WSL automaticamente
-
-### Erro "AUSTRAL_STDLIB not found"
-
+### "AUSTRAL_STDLIB not found"
+Ensure the `aurora-austral-standard-lib` is located in the parent directory of your project, or set the environment variable:
 ```bash
-# Baixar stdlib manualmente
-aurora init --no-binary
-# Ou definir variável de ambiente
-export AUSTRAL_STDLIB=/usr/local/lib/austral/standard/src
+export AUSTRAL_STDLIB=/path/to/your/stdlib/src
 ```
 
-### Pacote não compila
+---
 
-```bash
-# Limpar cache e reinstalar
-aurora uninstall <package>
-rm -rf ~/.aurora_austral/packages/<package>
-aurora install <package>
-```
+## License
 
-## Contribuindo
-
-1. Fork o repositório
-2. Crie uma branch: `git checkout -b feature/nova-feature`
-3. Commit: `git commit -m 'Adiciona nova feature'`
-4. Push: `git push origin feature/nova-feature`
-5. Abra um Pull Request
-
-## Licença
-
-Apache-2.0
+Licensed under the **Apache-2.0 License**.
 
 ## Links
 
-- [Aurora Austral](https://github.com/austral/austral)
+- [Aurora Austral Compiler](https://github.com/austral/austral)
 - [Package Vault](https://github.com/Aurora-Austral/vault)
-- [Documentação](https://austral-lang.org/)
+- [Official Documentation](https://austral-lang.org/)
