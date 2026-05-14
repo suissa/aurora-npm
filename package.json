@@ -1,6 +1,6 @@
 {
   "name": "@aurora.purecore.codes/latest",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Aurora Package Manager - Standalone (no external dependencies)",
   "main": "index.js",
   "bin": {

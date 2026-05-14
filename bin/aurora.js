@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 
-const { Command } = require('commander');
+// Zero-dependency: no require('commander') needed.
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-
-const program = new Command();
 
 const CACHE_DIR = path.join(os.homedir(), '.aurora_austral', 'packages');
 const BIN_CACHE_DIR = path.join(os.homedir(), '.aurora_austral', 'bin');
@@ -97,9 +95,26 @@ function runCmd(cmd, cwd, silent = false) {
     if (process.platform === 'win32') {
         finalCmd = `wsl ${cmd}`;
     }
+    
+    // Resolve local standard library path (two levels up from cwd's aurora_packages/pkg)
+    const stdlibCandidates = [
+        path.resolve(__dirname, '..', '..', '..', 'aurora-austral-standard-lib', 'src'),
+        path.resolve(process.cwd(), '..', 'aurora-austral-standard-lib', 'src'),
+        path.resolve(process.cwd(), '../../aurora-austral-standard-lib/src'),
+    ];
+    const STDLIB_PATH = stdlibCandidates.find(p => fs.existsSync(p)) || process.env.AUSTRAL_STDLIB || '';
+    
     try {
         const { execSync } = require('child_process');
-        const output = execSync(finalCmd, { cwd, stdio: silent ? 'pipe' : 'inherit', encoding: 'utf-8' });
+        const output = execSync(finalCmd, { 
+            cwd, 
+            stdio: silent ? 'pipe' : 'inherit', 
+            encoding: 'utf-8',
+            env: {
+                ...process.env,
+                ...(STDLIB_PATH ? { AUSTRAL_STDLIB: STDLIB_PATH } : {})
+            }
+        });
         return { success: true, message: output };
     } catch (error) {
         return { 
@@ -149,6 +164,11 @@ class Spinner {
         process.stdout.write(`\r${colorize('red', '✖')} ${message}\n`);
     }
     
+    stop() {
+        clearInterval(this.interval);
+        process.stdout.write('\r' + ' '.repeat(process.stdout.columns || 80) + '\r');
+    }
+    
     info(message) {
         clearInterval(this.interval);
         process.stdout.write(`\r${colorize('cyan', 'ℹ')} ${message}\n`);
@@ -174,6 +194,26 @@ async function partialCleanup(dir) {
             }
         }
     }
+}
+
+// Recursive directory copy
+function copyDirAll(src, dst) {
+    fs.mkdirSync(dst, { recursive: true });
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+        const srcPath = path.join(src, entry.name);
+        const dstPath = path.join(dst, entry.name);
+        if (entry.isDirectory()) {
+            copyDirAll(srcPath, dstPath);
+        } else {
+            fs.copyFileSync(srcPath, dstPath);
+        }
+    }
+}
+
+// Cross-device safe move (copy + delete), avoids EXDEV on WSL/Windows
+function moveDir(src, dst) {
+    copyDirAll(src, dst);
+    fs.rmSync(src, { recursive: true, force: true });
 }
 
 // Main aurora init command
@@ -282,25 +322,7 @@ async function initCommand(options) {
                     testSpinner.succeed('Compiler binary works!');
                 }
                 
-                // Download stdlib regardless of binary status
-                const stdlibSpinner = new Spinner('Downloading standard library...');
-                stdlibSpinner.start();
-                
-                const stdlibPath = path.join(BIN_CACHE_DIR, 'stdlib');
-                await downloadDirectoryFromRepo(
-                    COMPILER_REPO_OWNER,
-                    COMPILER_REPO_NAME,
-                    'standard/src',
-                    stdlibPath
-                );
-                
-                const localStdlibPath = path.join(process.cwd(), '.aurora', 'stdlib');
-                if (fs.existsSync(localStdlibPath)) {
-                    fs.rmSync(localStdlibPath, { recursive: true, force: true });
-                }
-                fs.renameSync(stdlibPath, localStdlibPath);
-                
-                stdlibSpinner.succeed(`Standard library installed: ${localStdlibPath}`);
+                // stdlib download removed — we use the local aurora-austral-standard-lib
                 
                 // Update aurora.json
                 const config = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
@@ -311,7 +333,7 @@ async function initCommand(options) {
                     config.aurora.compiler = 'system';
                     config.aurora.note = 'Using system-installed austral compiler';
                 }
-                config.aurora.stdlibPath = '.aurora/stdlib';
+                config.aurora.stdlibPath = 'local:aurora-austral-standard-lib/src';
                 fs.writeFileSync(packageJsonPath, JSON.stringify(config, null, 2));
                 
             } catch (error) {
@@ -461,7 +483,7 @@ async function installPackage(packageName) {
             spinner.text = `Using cached version of ${packageName}...`;
             if (!fs.existsSync(LOCAL_DIR)) fs.mkdirSync(LOCAL_DIR);
             if (fs.existsSync(localPath)) fs.rmSync(localPath, { recursive: true, force: true });
-            fs.renameSync(cachePath, localPath);
+            moveDir(cachePath, localPath); // cross-device safe
             spinner.succeed(`Package ${packageName} installed from cache.`);
             return;
         }
@@ -489,9 +511,12 @@ async function installPackage(packageName) {
         }
 
         spinner.start(`Caching ${packageName}...`);
-        fs.renameSync(localPath, cachePath);
+        // Copy to cache but KEEP in aurora_packages/ so the Austral compiler can find the .aui/.aum files
+        if (fs.existsSync(cachePath)) fs.rmSync(cachePath, { recursive: true, force: true });
+        copyDirAll(localPath, cachePath);
 
         spinner.succeed(`Package ${packageName} installed successfully.`);
+        console.log(colorize('cyan', `  → Files available at: aurora_packages/${packageName}`));
     } catch (error) {
         spinner.fail(`Error installing ${packageName}: ${error.message}`);
         if (fs.existsSync(localPath)) await partialCleanup(localPath);
@@ -524,21 +549,53 @@ async function listPackages(options) {
     }
 }
 
-// Find package command
-async function findPackage(packageName) {
-    const spinner = new Spinner(`Searching for ${packageName}...`);
+async function findPackage(query) {
+    const spinner = new Spinner(`Searching for "${query}" in names and READMEs...`);
+    spinner.start();
     try {
         const response = await fetch(API_URL, { headers: { 'User-Agent': 'aurora-npm' } });
-        if (!response.ok) throw new Error(`Failed to fetch: ${response.statusText}`);
+        if (!response.ok) throw new Error(`Failed to fetch package list: ${response.statusText}`);
         const items = await response.json();
-        const packages = items.filter(item => item.type === 'dir').map(item => item.name);
-        const filtered = packages.filter(p => p.toLowerCase().includes(packageName.toLowerCase()));
+        const packageDirs = items.filter(item => item.type === 'dir');
+
+        const searchResults = await Promise.all(packageDirs.map(async (dir) => {
+            const name = dir.name;
+            const lowerQuery = query.toLowerCase();
+            
+            // Match by name
+            if (name.toLowerCase().includes(lowerQuery)) {
+                return { name, match: 'name' };
+            }
+
+            // Match by README content
+            try {
+                // We use raw.githubusercontent.com to get the file content directly
+                const readmeUrl = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/packages/${name}/README.md`;
+                const readmeRes = await fetch(readmeUrl);
+                if (readmeRes.ok) {
+                    const content = await readmeRes.text();
+                    if (content.toLowerCase().includes(lowerQuery)) {
+                        return { name, match: 'readme' };
+                    }
+                }
+            } catch (e) {
+                // Ignore README errors
+            }
+            return null;
+        }));
+
+        const filtered = searchResults.filter(r => r !== null);
+        
         spinner.stop();
         if (filtered.length > 0) {
-            console.log(colorize('bold', `Found packages matching "${packageName}":`));
-            filtered.forEach(p => console.log(` - ${p}`));
+            console.log(colorize('bold', `\nFound ${filtered.length} packages matching "${query}":`));
+            filtered.forEach(p => {
+                const reason = p.match === 'readme' ? colorize('cyan', ' (found in README)') : '';
+                console.log(` - ${colorize('green', p.name)}${reason}`);
+            });
+            console.log('');
         } else {
-            console.log(colorize('yellow', `No packages found matching "${packageName}".`));
+            console.log(colorize('yellow', `\nNo packages found matching "${query}".`));
         }
     } catch (error) {
         spinner.fail(`Error: ${error.message}`);
@@ -644,12 +701,12 @@ async function updatePackage(packageName) {
             if (fs.existsSync(localPath)) {
                 fs.rmSync(localPath, { recursive: true, force: true });
             }
-            fs.renameSync(tempDir, localPath);
+            moveDir(tempDir, localPath);
             
             if (fs.existsSync(cachePath)) {
                 fs.rmSync(cachePath, { recursive: true, force: true });
             }
-            fs.renameSync(localPath, cachePath);
+            copyDirAll(localPath, cachePath);
             
             spinner.succeed(`Package ${pkg} updated.`);
         } catch (error) {
@@ -658,46 +715,75 @@ async function updatePackage(packageName) {
     }
 }
 
-program
-    .name('aurora')
-    .description('Aurora Package Manager')
-    .version('0.1.0');
+// ── Native CLI parser (zero dependencies) ────────────────────────────────────
+const args = process.argv.slice(2);
+const command = args[0];
+const flags = new Set(args.filter(a => a.startsWith('--')));
+const positional = args.filter(a => !a.startsWith('--'));
 
-program
-    .command('init')
-    .description('Initialize a new Aurora project')
-    .option('--no-binary', 'Skip downloading compiler binary')
-    .action(initCommand);
+function printHelp() {
+    console.log(`
+  ${colorize('bold', colorize('cyan', 'aurora'))} - Aurora Austral Package Manager v0.1.0
 
-program
-    .command('install <package-name>')
-    .description('Install a package')
-    .action(installPackage);
+  ${colorize('bold', 'Usage:')}
+    aurora <command> [options]
 
-program
-    .command('list')
-    .description('List packages')
-    .option('--local', 'List locally cached packages')
-    .action(listPackages);
+  ${colorize('bold', 'Commands:')}
+    init                     Initialize a new Aurora project
+    install <package>        Install a package from the vault
+    list [--local]           List remote (or local) packages
+    find <name>              Search for a package
+    uninstall <package>      Remove a package
+    test <package>           Run tests for an installed package
+    update [package]         Update one or all packages
 
-program
-    .command('find <package-name>')
-    .description('Find a package')
-    .action(findPackage);
+  ${colorize('bold', 'Options:')}
+    --no-binary              (init) Skip downloading compiler binary
+    --local                  (list) List locally cached packages
+    --help, -h               Show this help message
+    --version, -v            Show version
+`);
+}
 
-program
-    .command('uninstall <package-name>')
-    .description('Uninstall a package from project and cache')
-    .action(uninstallPackage);
+(async () => {
+    if (!command || command === '--help' || command === '-h') {
+        printHelp();
+        process.exit(0);
+    }
+    if (command === '--version' || command === '-v') {
+        console.log('aurora 0.1.0');
+        process.exit(0);
+    }
 
-program
-    .command('test <package-name>')
-    .description('Run tests for a package')
-    .action(testPackage);
-
-program
-    .command('update [package-name]')
-    .description('Update packages (project and cache)')
-    .action(updatePackage);
-
-program.parse(process.argv);
+    switch (command) {
+        case 'init':
+            await initCommand({ binary: !flags.has('--no-binary') });
+            break;
+        case 'install':
+            if (!positional[1]) { console.log(colorize('red', 'Usage: aurora install <package-name>')); process.exit(1); }
+            await installPackage(positional[1]);
+            break;
+        case 'list':
+            await listPackages({ local: flags.has('--local') });
+            break;
+        case 'find':
+            if (!positional[1]) { console.log(colorize('red', 'Usage: aurora find <package-name>')); process.exit(1); }
+            await findPackage(positional[1]);
+            break;
+        case 'uninstall':
+            if (!positional[1]) { console.log(colorize('red', 'Usage: aurora uninstall <package-name>')); process.exit(1); }
+            await uninstallPackage(positional[1]);
+            break;
+        case 'test':
+            if (!positional[1]) { console.log(colorize('red', 'Usage: aurora test <package-name>')); process.exit(1); }
+            await testPackage(positional[1]);
+            break;
+        case 'update':
+            await updatePackage(positional[1] || null);
+            break;
+        default:
+            console.log(colorize('red', `Unknown command: ${command}`));
+            printHelp();
+            process.exit(1);
+    }
+})();
